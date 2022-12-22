@@ -14,26 +14,36 @@ pub mod v01;
 pub mod v02;
 
 use crate::metrics::middleware::{MaybeRpcMetricsMiddleware, RpcMetricsMiddleware};
+use futures::future::Either;
 use jsonrpsee::{
     core::server::rpc_module::Methods,
     http_server::{HttpServerBuilder, HttpServerHandle, RpcModule},
+    ws_server::{WsServerBuilder, WsServerHandle},
 };
 use std::{net::SocketAddr, result::Result};
 use tokio::sync::RwLock;
+
 use v01::{api::RpcApi, types::reply::Syncing};
+
+pub enum Transport {
+    Http,
+    Ws,
+}
 
 pub struct RpcServer {
     addr: SocketAddr,
     api: RpcApi,
     middleware: MaybeRpcMetricsMiddleware,
+    transport: Transport,
 }
 
 impl RpcServer {
-    pub fn new(addr: SocketAddr, api: RpcApi) -> Self {
+    pub fn new(addr: SocketAddr, api: RpcApi, transport: Transport) -> Self {
         Self {
             addr,
             api,
             middleware: MaybeRpcMetricsMiddleware::NoOp,
+            transport,
         }
     }
 
@@ -44,8 +54,25 @@ impl RpcServer {
         }
     }
 
+    pub async fn run(
+        self,
+    ) -> Result<(Either<HttpServerHandle, WsServerHandle>, SocketAddr), anyhow::Error> {
+        match self.transport {
+            Transport::Http => {
+                let (handle, addr) = self.run_http().await?;
+                Ok((Either::Left(handle), addr))
+            }
+            Transport::Ws => {
+                let (handle, addr) = self.run_ws().await?;
+                Ok((Either::Right(handle), addr))
+            }
+        }
+    }
+
     /// Starts the HTTP-RPC server.
-    pub async fn run(self) -> Result<(HttpServerHandle, SocketAddr), anyhow::Error> {
+    async fn run_http(
+        self,
+    ) -> Result<(HttpServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
         let server = HttpServerBuilder::default()
             .set_middleware(self.middleware)
             .build(self.addr)
@@ -81,13 +108,48 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
         let module_v02 = v02::register_methods(context_v02)?;
         let pathfinder_module = pathfinder::register_methods(pathfinder_context)?;
 
-        Ok(server
+        server
             .start_with_paths([
                 (vec!["/rpc/v0.1"], module_v01),
                 (vec!["/", "/rpc/v0.2"], module_v02),
                 (vec!["/rpc/pathfinder/v0.1"], pathfinder_module),
             ])
-            .map(|handle| (handle, local_addr))?)
+            .map(|handle| (handle, local_addr))
+    }
+
+    /// Starts the WS-RPC server.
+    async fn run_ws(
+        self,
+    ) -> Result<(WsServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
+        let server = WsServerBuilder::default()
+            .set_middleware(self.middleware)
+            .build(self.addr)
+            .await
+            .map_err(|e| match e {
+                jsonrpsee::core::Error::Transport(_) => {
+                    use std::error::Error;
+
+                    if let Some(inner) = e.source().and_then(|inner| inner.downcast_ref::<std::io::Error>()) {
+                        if let std::io::ErrorKind::AddrInUse = inner.kind() {
+                            return anyhow::Error::new(e)
+                                .context(format!("RPC address is already in use: {}.
+
+Hint: This usually means you are already running another instance of pathfinder.
+Hint: If this happens when upgrading, make sure to shut down the first one first.
+Hint: If you are looking to run two instances of pathfinder, you must configure them with different http rpc addresses.", self.addr));
+                        }
+                    }
+
+                    anyhow::Error::new(e)
+                }
+                _ => anyhow::Error::new(e),
+            })?;
+        let local_addr = server.local_addr()?;
+
+        let context_v02: context::RpcContext = (&self.api).into();
+        let module_v02 = v02::register_methods(context_v02)?;
+
+        server.start(module_v02).map(|handle| (handle, local_addr))
     }
 }
 
@@ -105,7 +167,7 @@ impl Default for SyncState {
 
 #[cfg(test)]
 mod tests {
-    use crate::RpcServer;
+    use crate::{RpcServer, Transport};
     use ethers::types::H256;
     use jsonrpsee::{http_server::HttpServerHandle, types::ParamsSer};
     use pathfinder_common::{
@@ -141,8 +203,8 @@ mod tests {
     pub async fn run_server(
         addr: SocketAddr,
         api: super::v01::api::RpcApi,
-    ) -> Result<(HttpServerHandle, SocketAddr), anyhow::Error> {
-        RpcServer::new(addr, api).run().await
+    ) -> Result<(HttpServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
+        RpcServer::new(addr, api, Transport::Http).run_http().await
     }
 
     /// Helper function: produces named rpc method args map.

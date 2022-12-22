@@ -10,7 +10,7 @@ use pathfinder_lib::{
     monitoring::{self},
     state,
 };
-use pathfinder_rpc::{cairo, metrics::middleware::RpcMetricsMiddleware, SyncState};
+use pathfinder_rpc::{cairo, metrics::middleware::RpcMetricsMiddleware, SyncState, Transport};
 use pathfinder_storage::{JournalMode, Storage};
 use starknet_gateway_client::ClientApi;
 use starknet_gateway_types::pending::PendingData;
@@ -290,13 +290,27 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         false => api,
     };
 
-    let (rpc_handle, local_addr) = pathfinder_rpc::RpcServer::new(config.http_rpc_addr, api)
-        .with_middleware(RpcMetricsMiddleware)
-        .run()
-        .await
-        .context("Starting the RPC server")?;
+    let rpc_transport = match config.rpc_transport {
+        Some(transport) => match transport.as_str() {
+            "http" => Transport::Http,
+            "ws" => Transport::Ws,
+            other => {
+                anyhow::bail!(
+                    "{other} is not a valid rpc transport. Please specify one of: http, ws."
+                )
+            }
+        },
+        None => Transport::Http,
+    };
 
-    info!("📡 HTTP-RPC server started on: {}", local_addr);
+    let (rpc_handle, local_addr) =
+        pathfinder_rpc::RpcServer::new(config.http_rpc_addr, api, rpc_transport)
+            .with_middleware(RpcMetricsMiddleware)
+            .run()
+            .await
+            .context("Starting the RPC server")?;
+
+    info!("📡 RPC server started on: {}", local_addr);
 
     let update_handle = tokio::spawn(update::poll_github_for_releases());
 
