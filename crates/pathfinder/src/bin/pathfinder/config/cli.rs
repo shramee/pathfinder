@@ -11,6 +11,7 @@ const DATA_DIR_KEY: &str = "data-directory";
 const ETH_URL_KEY: &str = "ethereum.url";
 const ETH_PASS_KEY: &str = "ethereum.password";
 const HTTP_RPC_ADDR_KEY: &str = "http-rpc";
+const RPC_TRANSPORT_KEY: &str = "rpc-transport";
 const SEQ_URL_KEY: &str = "sequencer-url";
 const PYTHON_SUBPROCESSES_KEY: &str = "python-subprocesses";
 const SQLITE_WAL: &str = "sqlite-wal";
@@ -51,6 +52,7 @@ where
     let ethereum_url = args.value_of(ETH_URL_KEY).map(|s| s.to_owned());
     let ethereum_password = args.value_of(ETH_PASS_KEY).map(|s| s.to_owned());
     let http_rpc_addr = args.value_of(HTTP_RPC_ADDR_KEY).map(|s| s.to_owned());
+    let rpc_transport = args.value_of(RPC_TRANSPORT_KEY).map(|s| s.to_owned());
     let sequencer_url = args.value_of(SEQ_URL_KEY).map(|s| s.to_owned());
     let python_subprocesses = args.value_of(PYTHON_SUBPROCESSES_KEY).map(|s| s.to_owned());
     let sqlite_wal = args.value_of(SQLITE_WAL).map(|s| s.to_owned());
@@ -68,6 +70,7 @@ where
         .with(ConfigOption::EthereumHttpUrl, ethereum_url)
         .with(ConfigOption::EthereumPassword, ethereum_password)
         .with(ConfigOption::HttpRpcAddress, http_rpc_addr)
+        .with(ConfigOption::RpcTransport, rpc_transport)
         .with(ConfigOption::DataDirectory, data_directory)
         .with(ConfigOption::SequencerHttpUrl, sequencer_url)
         .with(ConfigOption::PythonSubprocesses, python_subprocesses)
@@ -132,6 +135,14 @@ Examples:
                 .takes_value(true)
                 .value_name("IP:PORT")
                 .env("PATHFINDER_HTTP_RPC_ADDRESS")
+        )
+        .arg(
+            Arg::new(RPC_TRANSPORT_KEY)
+                .long(RPC_TRANSPORT_KEY)
+                .help("Transport to use for the RPC server (http or ws)")
+                .takes_value(true)
+                .value_name("TRANSPORT")
+                .env("PATHFINDER_RPC_TRANSPORT")
         )
         .arg(
             Arg::new(DATA_DIR_KEY)
@@ -256,6 +267,7 @@ mod tests {
         env::remove_var("PATHFINDER_ETHEREUM_API_PASSWORD");
         env::remove_var("PATHFINDER_ETHEREUM_API_URL");
         env::remove_var("PATHFINDER_HTTP_RPC_ADDRESS");
+        env::remove_var("PATHFINDER_RPC_TRANSPORT");
         env::remove_var("PATHFINDER_DATA_DIRECTORY");
         env::remove_var("PATHFINDER_SEQUENCER_URL");
         env::remove_var("PATHFINDER_PYTHON_SUBPROCESSES");
@@ -349,6 +361,27 @@ mod tests {
         env::set_var("PATHFINDER_HTTP_RPC_ADDRESS", &value);
         let (_, mut cfg) = parse_args(vec!["bin name"]).unwrap();
         assert_eq!(cfg.take(ConfigOption::HttpRpcAddress), Some(value));
+    }
+
+    #[test]
+    fn rpc_transport_long() {
+        let _env_guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        clear_environment();
+
+        let value = "value".to_owned();
+        let (_, mut cfg) = parse_args(vec!["bin name", "--rpc-transport", &value]).unwrap();
+        assert_eq!(cfg.take(ConfigOption::RpcTransport), Some(value));
+    }
+
+    #[test]
+    fn rpc_transport_environment_variable() {
+        let _env_guard = ENV_VAR_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        clear_environment();
+
+        let value = "value".to_owned();
+        env::set_var("PATHFINDER_RPC_TRANSPORT", &value);
+        let (_, mut cfg) = parse_args(vec!["bin name"]).unwrap();
+        assert_eq!(cfg.take(ConfigOption::RpcTransport), Some(value));
     }
 
     #[test]

@@ -121,6 +121,7 @@ Hint: Register your own account or run your own Ethereum node and put the real U
             None => None,
         };
         let chain_id = self.take(ConfigOption::ChainId);
+        let rpc_transport = self.take(ConfigOption::RpcTransport);
 
         let custom_gateway = match (gateway, feeder, chain_id) {
             (None, None, None) => None,
@@ -223,6 +224,7 @@ Hint: Register your own account or run your own Ethereum node and put the real U
                 password: eth_password,
             },
             http_rpc_addr,
+            rpc_transport,
             data_directory,
             sequencer_url,
             python_subprocesses,

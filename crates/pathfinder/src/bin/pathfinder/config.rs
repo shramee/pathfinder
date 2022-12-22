@@ -20,6 +20,8 @@ pub enum ConfigOption {
     EthereumPassword,
     /// The HTTP-RPC listening socket address.
     HttpRpcAddress,
+    /// The RPC transport (HTTP or WS).
+    RpcTransport,
     /// Path to the node's data directory.
     DataDirectory,
     /// The Sequencer's HTTP URL.
@@ -53,6 +55,7 @@ impl Display for ConfigOption {
             ConfigOption::EthereumPassword => f.write_str("Ethereum password"),
             ConfigOption::DataDirectory => f.write_str("Data directory"),
             ConfigOption::HttpRpcAddress => f.write_str("HTTP-RPC socket address"),
+            ConfigOption::RpcTransport => f.write_str("RPC transport"),
             ConfigOption::SequencerHttpUrl => f.write_str("Sequencer HTTP URL"),
             ConfigOption::PythonSubprocesses => f.write_str("Number of Python subprocesses"),
             ConfigOption::EnableSQLiteWriteAheadLogging => {
@@ -88,6 +91,8 @@ pub struct Configuration {
     pub ethereum: EthereumConfig,
     /// The HTTP-RPC listening address and port.
     pub http_rpc_addr: SocketAddr,
+    /// The RPC transport (HTTP or WS).
+    pub rpc_transport: Option<String>,
     /// The node's data directory.
     pub data_directory: PathBuf,
     /// The Sequencer's HTTP URL.
