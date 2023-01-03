@@ -31,7 +31,7 @@ use starknet_gateway_types::{
 };
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 /// Implements the main sync loop, where L1 and L2 sync results are combined.
 #[allow(clippy::too_many_arguments)]
@@ -46,6 +46,7 @@ pub async fn sync<Transport, SequencerClient, F1, F2, L1Sync, L2Sync>(
     l2_sync: L2Sync,
     pending_data: PendingData,
     pending_poll_interval: Option<std::time::Duration>,
+    tx_ws_l2: broadcast::Sender<String>,
 ) -> anyhow::Result<()>
 where
     Transport: EthereumTransport + Clone,
@@ -55,6 +56,7 @@ where
     L1Sync: FnMut(mpsc::Sender<l1::Event>, Transport, Chain, H160, Option<StateUpdateLog>) -> F1,
     L2Sync: FnOnce(
             mpsc::Sender<l2::Event>,
+            broadcast::Sender<String>,
             SequencerClient,
             Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
             Chain,
@@ -105,6 +107,7 @@ where
     ));
     let mut l2_handle = tokio::spawn(l2_sync(
         tx_l2,
+        tx_ws_l2,
         sequencer.clone(),
         l2_head,
         chain,
@@ -386,9 +389,10 @@ where
                     .map(|block| (block.number, block.hash, block.root));
 
                     let (new_tx, new_rx) = mpsc::channel(1);
+                    let (new_tx_ws, _new_rx_ws) = broadcast::channel(16);
                     rx_l2 = new_rx;
 
-                    let fut = l2_sync(new_tx, sequencer.clone(), l2_head, chain, pending_poll_interval);
+                    let fut = l2_sync(new_tx, new_tx_ws, sequencer.clone(), l2_head, chain, pending_poll_interval);
 
                     l2_handle = tokio::spawn(async move {
                         #[cfg(not(test))]
@@ -397,7 +401,7 @@ where
                     });
                     tracing::info!("L2 sync process restarted.");
                 }
-            }
+            },
         }
     }
 }
@@ -901,7 +905,7 @@ mod tests {
         request::{add_transaction::ContractDefinition, BlockHashOrTag},
     };
     use std::{sync::Arc, time::Duration};
-    use tokio::sync::mpsc;
+    use tokio::sync::{broadcast, mpsc};
 
     #[derive(Debug, Clone)]
     struct FakeTransport;
@@ -1068,6 +1072,7 @@ mod tests {
 
     async fn l2_noop(
         _: mpsc::Sender<l2::Event>,
+        _: broadcast::Sender<String>,
         _: impl ClientApi,
         _: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
         _: Chain,
@@ -1164,6 +1169,7 @@ mod tests {
         let chain = Chain::Testnet;
         let sync_state = Arc::new(SyncState::default());
         let core_address = pathfinder_ethereum::contract::TESTNET_ADDRESSES.core;
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         lazy_static::lazy_static! {
             static ref UPDATES: Arc<tokio::sync::RwLock<Vec<Vec<pathfinder_ethereum::log::StateUpdateLog>>>> =
@@ -1218,6 +1224,7 @@ mod tests {
                 l2_noop,
                 PendingData::default(),
                 None,
+                tx_ws_l2.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1260,6 +1267,7 @@ mod tests {
             let storage = Storage::in_memory().unwrap();
             let mut connection = storage.connection().unwrap();
             let tx = connection.transaction().unwrap();
+            let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
             // A simple L1 sync task
             let l1 = move |tx: mpsc::Sender<l1::Event>, _, _, _, _| async move {
@@ -1292,6 +1300,7 @@ mod tests {
                 l2_noop,
                 PendingData::default(),
                 None,
+                tx_ws_l2.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1328,6 +1337,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let mut connection = storage.connection().unwrap();
         let tx = connection.transaction().unwrap();
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // This is what we're asking for
         L1StateTable::upsert(&tx, &STATE_UPDATE_LOG0).unwrap();
@@ -1362,6 +1372,7 @@ mod tests {
             l2_noop,
             PendingData::default(),
             None,
+            tx_ws_l2.clone(),
         ));
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1373,6 +1384,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
 
         let (starts_tx, mut starts_rx) = tokio::sync::mpsc::channel(1);
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         let l1 = move |_, _, _, _, _| {
             let starts_tx = starts_tx.clone();
@@ -1398,6 +1410,7 @@ mod tests {
             l2_noop,
             PendingData::default(),
             None,
+            tx_ws_l2.clone(),
         ));
 
         let timeout = std::time::Duration::from_secs(1);
@@ -1419,6 +1432,7 @@ mod tests {
     async fn l2_update() {
         let chain = Chain::Testnet;
         let sync_state = Arc::new(SyncState::default());
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // Incoming L2 update
         let block = || BLOCK0.clone();
@@ -1431,7 +1445,7 @@ mod tests {
         };
 
         // A simple L2 sync task
-        let l2 = move |tx: mpsc::Sender<l2::Event>, _, _, _, _| async move {
+        let l2 = move |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
             tx.send(l2::Event::Update(
                 Box::new(block()),
                 Box::new(state_update()),
@@ -1473,6 +1487,7 @@ mod tests {
                 l2,
                 PendingData::default(),
                 None,
+                tx_ws_l2.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1510,9 +1525,10 @@ mod tests {
             let storage = Storage::in_memory().unwrap();
             let mut connection = storage.connection().unwrap();
             let tx = connection.transaction().unwrap();
+            let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
             // A simple L2 sync task
-            let l2 = move |tx: mpsc::Sender<l2::Event>, _, _, _, _| async move {
+            let l2 = move |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
                 tx.send(l2::Event::Reorg(StarknetBlockNumber::new_or_panic(
                     reorg_on_block,
                 )))
@@ -1542,6 +1558,7 @@ mod tests {
                 l2,
                 PendingData::default(),
                 None,
+                tx_ws_l2.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1576,9 +1593,10 @@ mod tests {
     async fn l2_new_contract() {
         let storage = Storage::in_memory().unwrap();
         let connection = storage.connection().unwrap();
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // A simple L2 sync task
-        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _| async move {
+        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
             let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
             tx.send(l2::Event::NewContract(CompressedContract {
                 abi: zstd_magic.clone(),
@@ -1605,6 +1623,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
+            tx_ws_l2.clone(),
         ));
 
         // TODO Find a better way to figure out that the DB update has already been performed
@@ -1621,12 +1640,13 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let mut connection = storage.connection().unwrap();
         let tx = connection.transaction().unwrap();
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // This is what we're asking for
         StarknetBlocksTable::insert(&tx, &STORAGE_BLOCK0, None).unwrap();
 
         // A simple L2 sync task which does the request and checks he result
-        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _| async move {
+        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
             let (tx1, rx1) = tokio::sync::oneshot::channel();
 
             tx.send(l2::Event::QueryBlock(StarknetBlockNumber::GENESIS, tx1))
@@ -1653,6 +1673,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
+            tx_ws_l2,
         ));
     }
 
@@ -1661,6 +1682,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let connection = storage.connection().unwrap();
         let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // This is what we're asking for
         ContractCodeTable::insert_compressed(
@@ -1675,7 +1697,7 @@ mod tests {
         .unwrap();
 
         // A simple L2 sync task which does the request and checks he result
-        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _| async move {
+        let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
             let (tx1, rx1) = tokio::sync::oneshot::channel::<Vec<bool>>();
 
             tx.send(l2::Event::QueryContractExistance(vec![ClassHash(*A)], tx1))
@@ -1701,6 +1723,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
+            tx_ws_l2,
         ));
     }
 
@@ -1711,9 +1734,10 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
 
         static CNT: AtomicUsize = AtomicUsize::new(0);
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
 
         // A simple L2 sync task
-        let l2 = move |_, _, _, _, _| async move {
+        let l2 = move |_, _, _, _, _, _| async move {
             CNT.fetch_add(1, Ordering::Relaxed);
             Ok(())
         };
@@ -1730,6 +1754,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
+            tx_ws_l2.clone(),
         ));
 
         tokio::time::sleep(Duration::from_millis(5)).await;

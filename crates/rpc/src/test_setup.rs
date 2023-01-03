@@ -295,7 +295,7 @@ where
             api,
             crate::Transport::Http,
         )
-        .run()
+        .run_http()
         .await
         .unwrap();
 

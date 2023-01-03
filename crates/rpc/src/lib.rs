@@ -21,7 +21,7 @@ use jsonrpsee::{
     ws_server::{WsServerBuilder, WsServerHandle},
 };
 use std::{net::SocketAddr, result::Result};
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 use v01::{api::RpcApi, types::reply::Syncing};
 
@@ -56,15 +56,24 @@ impl RpcServer {
 
     pub async fn run(
         self,
-    ) -> Result<(Either<HttpServerHandle, WsServerHandle>, SocketAddr), anyhow::Error> {
+    ) -> Result<
+        (
+            Either<HttpServerHandle, WsServerHandle>,
+            broadcast::Sender<String>,
+            SocketAddr,
+        ),
+        anyhow::Error,
+    > {
+        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
+
         match self.transport {
             Transport::Http => {
                 let (handle, addr) = self.run_http().await?;
-                Ok((Either::Left(handle), addr))
+                Ok((Either::Left(handle), tx_ws_l2, addr))
             }
             Transport::Ws => {
-                let (handle, addr) = self.run_ws().await?;
-                Ok((Either::Right(handle), addr))
+                let (handle, addr) = self.run_ws(tx_ws_l2.clone()).await?;
+                Ok((Either::Right(handle), tx_ws_l2, addr))
             }
         }
     }
@@ -120,6 +129,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
     /// Starts the WS-RPC server.
     async fn run_ws(
         self,
+        tx_ws_l2: broadcast::Sender<String>,
     ) -> Result<(WsServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
         let server = WsServerBuilder::default()
             .set_middleware(self.middleware)
@@ -146,10 +156,12 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
             })?;
         let local_addr = server.local_addr()?;
 
-        let context_v02: context::RpcContext = (&self.api).into();
-        let module_v02 = v02::register_methods(context_v02)?;
+        let mut module_v01 = v01::RpcModuleWrapper::new(RpcModule::new(self.api));
+        v01::register_all_methods(&mut module_v01)?;
+        v01::register_all_subscriptions(&mut module_v01, tx_ws_l2)?;
+        let module_v01: Methods = module_v01.into_inner().into();
 
-        server.start(module_v02).map(|handle| (handle, local_addr))
+        server.start(module_v01).map(|handle| (handle, local_addr))
     }
 }
 

@@ -295,7 +295,7 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         None => Transport::Http,
     };
 
-    let (rpc_handle, local_addr) =
+    let (rpc_handle, tx_ws_l2, local_addr) =
         pathfinder_rpc::RpcServer::new(config.http_rpc_addr, api, rpc_transport)
             .with_middleware(RpcMetricsMiddleware)
             .run()

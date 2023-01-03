@@ -13,7 +13,7 @@ use starknet_gateway_types::{
 };
 use std::time::Duration;
 use std::{collections::HashSet, sync::Arc};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Timings {
@@ -52,6 +52,7 @@ pub enum Event {
 
 pub async fn sync(
     tx_event: mpsc::Sender<Event>,
+    tx_ws_event: broadcast::Sender<String>,
     sequencer: impl ClientApi,
     mut head: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
     chain: Chain,
@@ -156,9 +157,19 @@ pub async fn sync(
         };
 
         tx_event
-            .send(Event::Update(block, Box::new(state_update), timings))
+            .send(Event::Update(
+                block.clone(),
+                Box::new(state_update),
+                timings,
+            ))
             .await
             .context("Event channel closed")?;
+
+        if tx_ws_event.receiver_count() > 0 {
+            tx_ws_event.send(
+                "New block: ".to_string() + block.clone().block_number.to_string().as_str(),
+            )?;
+        }
     }
 }
 
@@ -845,6 +856,7 @@ mod tests {
             #[tokio::test]
             async fn from_genesis() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -901,7 +913,14 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -942,6 +961,7 @@ mod tests {
             #[tokio::test]
             async fn resumed_after_genesis() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -982,6 +1002,7 @@ mod tests {
                 // Let's run the UUT
                 let _jh = tokio::spawn(sync(
                     tx_event,
+                    tx_ws_event,
                     mock,
                     Some((BLOCK0_NUMBER, *BLOCK0_HASH, *GLOBAL_ROOT0)),
                     Chain::Testnet,
@@ -1017,6 +1038,7 @@ mod tests {
             #[tokio::test]
             async fn invalid_block_status() {
                 let (tx_event, _rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -1025,7 +1047,14 @@ mod tests {
                 block.status = Status::Reverted;
                 expect_block(&mut mock, &mut seq, BLOCK0_NUMBER.into(), Ok(block.into()));
 
-                let jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
                 let error = jh.await.unwrap().unwrap_err();
                 assert_eq!(
                     &error.to_string(),
@@ -1050,6 +1079,7 @@ mod tests {
             //
             async fn at_genesis_which_is_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -1128,7 +1158,14 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1181,6 +1218,7 @@ mod tests {
             //
             async fn at_genesis_which_is_not_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -1333,7 +1371,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1420,6 +1465,7 @@ mod tests {
             //
             async fn after_genesis_and_not_at_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -1613,7 +1659,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1695,6 +1748,7 @@ mod tests {
             //
             async fn after_genesis_and_at_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -1820,7 +1874,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1884,6 +1945,7 @@ mod tests {
             //
             async fn parent_hash_mismatch() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
 
@@ -2016,7 +2078,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -2073,6 +2142,7 @@ mod tests {
             #[tokio::test]
             async fn shutdown() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
+                let (tx_ws_event, mut _rx_ws_event) = tokio::sync::broadcast::channel(16);
                 // Closing the event's channel should trigger the sync to exit with error after the first send.
                 rx_event.close();
 
@@ -2093,7 +2163,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None));
+                let jh = tokio::spawn(sync(
+                    tx_event,
+                    tx_ws_event,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 // Wrap this in a timeout so we don't wait forever in case of test failure.
                 // Right now closing the channel causes an error.
