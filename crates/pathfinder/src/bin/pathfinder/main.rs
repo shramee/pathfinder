@@ -252,20 +252,7 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         "Creating python process for call handling. Have you setup our Python dependencies?",
     )?;
 
-    let sync_handle = tokio::spawn(state::sync(
-        storage.clone(),
-        eth_transport.clone(),
-        network,
-        core_address,
-        gateway_client.clone(),
-        sync_state.clone(),
-        state::l1::sync,
-        state::l2::sync,
-        pending_state.clone(),
-        pending_interval,
-    ));
-
-    let shared = pathfinder_rpc::gas_price::Cached::new(Arc::new(eth_transport));
+    let shared = pathfinder_rpc::gas_price::Cached::new(Arc::new(eth_transport.clone()));
 
     let chain_id = match network {
         Chain::Mainnet => ChainId::MAINNET,
@@ -282,11 +269,16 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         }
     };
 
-    let api = pathfinder_rpc::v01::api::RpcApi::new(storage, gateway_client, chain_id, sync_state)
-        .with_call_handling(call_handle)
-        .with_eth_gas_price(shared);
+    let api = pathfinder_rpc::v01::api::RpcApi::new(
+        storage.clone(),
+        gateway_client.clone(),
+        chain_id,
+        sync_state.clone(),
+    )
+    .with_call_handling(call_handle)
+    .with_eth_gas_price(shared);
     let api = match config.poll_pending {
-        true => api.with_pending_data(pending_state),
+        true => api.with_pending_data(pending_state.clone()),
         false => api,
     };
 
@@ -311,6 +303,20 @@ If you are trying to setup a custom StarkNet please use '--network custom',
             .context("Starting the RPC server")?;
 
     info!("📡 RPC server started on: {}", local_addr);
+
+    let sync_handle = tokio::spawn(state::sync(
+        storage,
+        eth_transport,
+        network,
+        core_address,
+        gateway_client,
+        sync_state,
+        state::l1::sync,
+        state::l2::sync,
+        pending_state,
+        pending_interval,
+        tx_ws_l2,
+    ));
 
     let update_handle = tokio::spawn(update::poll_github_for_releases());
 
