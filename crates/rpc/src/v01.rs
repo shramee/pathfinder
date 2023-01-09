@@ -1,6 +1,4 @@
 use self::api::RpcApi;
-use jsonrpsee::core::error::SubscriptionClosed;
-use tokio_stream::wrappers::BroadcastStream;
 
 pub mod api;
 pub mod types;
@@ -337,39 +335,6 @@ pub fn register_all_methods(
                     params.token,
                 )
                 .await
-        },
-    )?;
-
-    Ok(())
-}
-
-// Registers all subscription for the v0.1 API
-pub fn register_all_subscriptions(
-    module: &mut RpcModuleWrapper<RpcApi>,
-    tx_ws_l2: tokio::sync::broadcast::Sender<std::string::String>,
-) -> Result<(), jsonrpsee::core::Error> {
-    module.0.register_subscription(
-        "starknet_subscribe_newHeads",
-        "s_newHeads",
-        "starknet_unsubscribe_newHeads",
-        move |_, pending, _| {
-            let tx_ws_l2 = BroadcastStream::new(tx_ws_l2.clone().subscribe());
-            let mut sink = match pending.accept() {
-                Some(sink) => sink,
-                _ => return,
-            };
-
-            tokio::spawn(async move {
-                match sink.pipe_from_try_stream(tx_ws_l2).await {
-                    SubscriptionClosed::Success => {
-                        sink.close(SubscriptionClosed::Success);
-                    }
-                    SubscriptionClosed::RemotePeerAborted => (),
-                    SubscriptionClosed::Failed(err) => {
-                        sink.close(err);
-                    }
-                };
-            });
         },
     )?;
 

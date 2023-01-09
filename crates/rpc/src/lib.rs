@@ -12,6 +12,7 @@ pub mod test_client;
 pub mod test_setup;
 pub mod v01;
 pub mod v02;
+pub mod websocket;
 
 use crate::metrics::middleware::{MaybeRpcMetricsMiddleware, RpcMetricsMiddleware};
 use futures::future::Either;
@@ -156,12 +157,21 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
             })?;
         let local_addr = server.local_addr()?;
 
+        let context_v02: context::RpcContext = (&self.api).into();
+        let pathfinder_context = context_v02.clone();
+        let websocket_context = context_v02.clone();
+
         let mut module_v01 = v01::RpcModuleWrapper::new(RpcModule::new(self.api));
         v01::register_all_methods(&mut module_v01)?;
-        v01::register_all_subscriptions(&mut module_v01, tx_ws_l2)?;
-        let module_v01: Methods = module_v01.into_inner().into();
+        let _module_v01: Methods = module_v01.into_inner().into();
 
-        server.start(module_v01).map(|handle| (handle, local_addr))
+        let _module_v02 = v02::register_methods(context_v02)?;
+        let _pathfinder_module = pathfinder::register_methods(pathfinder_context)?;
+        let websocket_module = websocket::register_subscriptions(websocket_context, tx_ws_l2)?;
+
+        server
+            .start(websocket_module)
+            .map(|handle| (handle, local_addr))
     }
 }
 
