@@ -21,7 +21,7 @@ use jsonrpsee::{
     http_server::{HttpServerBuilder, HttpServerHandle, RpcModule},
     ws_server::{WsServerBuilder, WsServerHandle},
 };
-use std::{net::SocketAddr, result::Result};
+use std::{collections::HashMap, net::SocketAddr, result::Result};
 use tokio::sync::{broadcast, RwLock};
 
 use v01::{api::RpcApi, types::reply::Syncing};
@@ -60,21 +60,21 @@ impl RpcServer {
     ) -> Result<
         (
             Either<HttpServerHandle, WsServerHandle>,
-            broadcast::Sender<String>,
+            HashMap<String, broadcast::Sender<String>>,
             SocketAddr,
         ),
         anyhow::Error,
     > {
-        let (tx_ws_l2, _rx_ws_l2) = broadcast::channel(16);
+        let mut event_txs: HashMap<String, broadcast::Sender<String>> = HashMap::new();
 
         match self.transport {
             Transport::Http => {
                 let (handle, addr) = self.run_http().await?;
-                Ok((Either::Left(handle), tx_ws_l2, addr))
+                Ok((Either::Left(handle), event_txs, addr))
             }
             Transport::Ws => {
-                let (handle, addr) = self.run_ws(tx_ws_l2.clone()).await?;
-                Ok((Either::Right(handle), tx_ws_l2, addr))
+                let (handle, addr) = self.run_ws(&mut event_txs).await?;
+                Ok((Either::Right(handle), event_txs, addr))
             }
         }
     }
@@ -130,7 +130,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
     /// Starts the WS-RPC server.
     async fn run_ws(
         self,
-        tx_ws_l2: broadcast::Sender<String>,
+        event_txs: &mut HashMap<String, broadcast::Sender<String>>,
     ) -> Result<(WsServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
         let server = WsServerBuilder::default()
             .set_middleware(self.middleware)
@@ -167,7 +167,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
 
         let _module_v02 = v02::register_methods(context_v02)?;
         let _pathfinder_module = pathfinder::register_methods(pathfinder_context)?;
-        let websocket_module = websocket::register_subscriptions(websocket_context, tx_ws_l2)?;
+        let websocket_module = websocket::register_subscriptions(websocket_context, event_txs)?;
 
         server
             .start(websocket_module)

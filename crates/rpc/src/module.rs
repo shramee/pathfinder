@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use jsonrpsee::core::server::rpc_module::{Methods, PendingSubscription};
@@ -110,10 +111,10 @@ impl Module {
         subscription_answer_name: &'static str,
         unsubscription_name: &'static str,
         subscription: Subscription,
-        tx_ws_l2: tokio::sync::broadcast::Sender<std::string::String>,
+        event_txs: &mut HashMap<String, broadcast::Sender<String>>,
     ) -> anyhow::Result<Self>
     where
-        Subscription: (Fn(RpcContext, PendingSubscription, broadcast::Sender<std::string::String>))
+        Subscription: (Fn(RpcContext, PendingSubscription, &broadcast::Sender<std::string::String>))
             + Copy
             + Send
             + Sync
@@ -124,9 +125,12 @@ impl Module {
 
         metrics::register_counter!("rpc_subscription_calls_total", "subscription" => subscription_name);
 
+        event_txs.insert(subscription_name.to_string(), broadcast::channel(100).0);
+        let subscription_channel = event_txs.get(subscription_name).unwrap().clone();
+
         let subscription_callback =
             move |_params: Params<'_>, pending, context: Arc<RpcContext>| {
-                subscription((*context).clone(), pending, tx_ws_l2.clone())
+                subscription((*context).clone(), pending, &subscription_channel)
             };
 
         self.0

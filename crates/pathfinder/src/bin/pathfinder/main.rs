@@ -295,7 +295,7 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         None => Transport::Http,
     };
 
-    let (rpc_handle, tx_ws_l2, local_addr) =
+    let (rpc_handle, event_txs, local_addr) =
         pathfinder_rpc::RpcServer::new(config.http_rpc_addr, api, rpc_transport)
             .with_middleware(RpcMetricsMiddleware)
             .run()
@@ -315,7 +315,7 @@ If you are trying to setup a custom StarkNet please use '--network custom',
         state::l2::sync,
         pending_state,
         pending_interval,
-        tx_ws_l2,
+        event_txs,
     ));
 
     let update_handle = tokio::spawn(update::poll_github_for_releases());

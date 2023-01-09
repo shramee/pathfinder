@@ -4,7 +4,7 @@ use jsonrpsee::core::server::rpc_module::PendingSubscription;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
-pub fn subscribe_new_heads(
+pub fn subscribe_sync(
     _context: RpcContext,
     pending: PendingSubscription,
     event_txs: &broadcast::Sender<std::string::String>,
