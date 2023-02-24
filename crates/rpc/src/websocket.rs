@@ -1,4 +1,5 @@
 use jsonrpsee::core::server::rpc_module::Methods;
+use starknet_gateway_types::reply::ws_subscriptions::SubscriptionEvent;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
@@ -9,7 +10,7 @@ pub mod subscription;
 /// Registers all methods for the v0.2 RPC API
 pub fn register_subscriptions(
     context: RpcContext,
-    event_txs: &mut HashMap<String, broadcast::Sender<String>>,
+    event_txs: &mut HashMap<String, broadcast::Sender<SubscriptionEvent>>,
 ) -> anyhow::Result<Methods> {
     let methods = crate::module::Module::new(context)
         .register_subscription(

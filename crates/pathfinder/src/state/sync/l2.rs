@@ -8,6 +8,7 @@ use starknet_gateway_types::{
     error::SequencerError,
     reply::{
         state_update::{DeployedContract, StateDiff},
+        ws_subscriptions::{SubscriptionEvent, SubscriptionNewHeadEvent, SubscriptionSyncEvent},
         Block, PendingBlock, StateUpdate, Status,
     },
 };
@@ -55,20 +56,13 @@ pub enum Event {
 
 pub async fn sync(
     tx_event: mpsc::Sender<Event>,
-    event_txs: HashMap<String, broadcast::Sender<String>>,
+    event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
     sequencer: impl ClientApi,
     mut head: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
     chain: Chain,
     pending_poll_interval: Option<Duration>,
 ) -> anyhow::Result<()> {
     use crate::state::sync::head_poll_interval;
-
-    //TODO will be replaced with hashmap based on event type once shared architecture is finalized
-    let sync_channel = event_txs.get("starknet_subscribe_sync").unwrap();
-    if sync_channel.receiver_count() > 0 {
-        sync_channel
-            .send("Sync: true".to_string() + ", starting block: " + &head.unwrap().0.to_string())?;
-    }
 
     'outer: loop {
         // Get the next block from L2.
@@ -176,11 +170,19 @@ pub async fn sync(
             .context("Event channel closed")?;
 
         //TODO will be replaced with hashmap based on event type once shared architecture is finalized
+        // let sync_channel = event_txs.get("starknet_subscribe_sync").unwrap();
+        // if sync_channel.receiver_count() > 0 {
+        //     sync_channel.send(SubscriptionEvent::Sync(SubscriptionSyncEvent {
+        //         block: block,
+        //     }))?;
+        // }
+
+        //TODO will be replaced with hashmap based on event type once shared architecture is finalized
         let new_head_channel = event_txs.get("starknet_subscribe_newHeads").unwrap();
         if new_head_channel.receiver_count() > 0 {
-            new_head_channel.send(
-                "New block: ".to_string() + block.clone().block_number.to_string().as_str(),
-            )?;
+            new_head_channel.send(SubscriptionEvent::NewHead(SubscriptionNewHeadEvent {
+                block: block.clone(),
+            }))?;
         }
     }
 }
