@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use jsonrpsee::core::server::rpc_module::{Methods, PendingSubscription};
-use starknet_gateway_types::reply::ws_subscriptions::SubscriptionEvent;
+use starknet_gateway_types::websocket::SubscriptionEvent;
 use tokio::sync::broadcast;
 
 use crate::context::RpcContext;

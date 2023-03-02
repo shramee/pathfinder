@@ -27,10 +27,8 @@ use stark_hash::Felt;
 use starknet_gateway_client::ClientApi;
 use starknet_gateway_types::{
     pending::PendingData,
-    reply::{
-        state_update::DeployedContract, ws_subscriptions::SubscriptionEvent, Block,
-        MaybePendingBlock, StateUpdate,
-    },
+    reply::{state_update::DeployedContract, Block, MaybePendingBlock, StateUpdate},
+    websocket::SubscriptionEvent,
 };
 use std::collections::HashMap;
 use std::future::Future;
@@ -910,6 +908,7 @@ mod tests {
         pending::PendingData,
         reply,
         request::{add_transaction::ContractDefinition, BlockHashOrTag},
+        websocket::SubscriptionEvent,
     };
     use std::{collections::HashMap, sync::Arc, time::Duration};
     use tokio::sync::{broadcast, mpsc};

@@ -1,7 +1,7 @@
 use crate::context::RpcContext;
 use jsonrpsee::core::error::SubscriptionClosed;
 use jsonrpsee::core::server::rpc_module::PendingSubscription;
-use starknet_gateway_types::reply::ws_subscriptions::SubscriptionEvent;
+use starknet_gateway_types::websocket::SubscriptionEvent;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 

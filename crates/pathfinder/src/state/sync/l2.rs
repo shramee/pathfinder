@@ -8,9 +8,9 @@ use starknet_gateway_types::{
     error::SequencerError,
     reply::{
         state_update::{DeployedContract, StateDiff},
-        ws_subscriptions::{SubscriptionEvent, SubscriptionNewHeadEvent, SubscriptionSyncEvent},
         Block, PendingBlock, StateUpdate, Status,
     },
+    websocket::{SubscriptionEvent, SubscriptionNewHeadEvent, SubscriptionSyncEvent},
 };
 use std::time::Duration;
 use std::{

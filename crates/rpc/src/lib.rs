@@ -21,7 +21,7 @@ use jsonrpsee::{
     http_server::{HttpServerBuilder, HttpServerHandle, RpcModule},
     ws_server::{WsServerBuilder, WsServerHandle},
 };
-use starknet_gateway_types::reply::ws_subscriptions::SubscriptionEvent;
+use starknet_gateway_types::websocket::SubscriptionEvent;
 use std::{collections::HashMap, net::SocketAddr, result::Result};
 use tokio::sync::{broadcast, RwLock};
 

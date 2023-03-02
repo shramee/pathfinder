@@ -1,5 +1,5 @@
 use jsonrpsee::core::server::rpc_module::Methods;
-use starknet_gateway_types::reply::ws_subscriptions::SubscriptionEvent;
+use starknet_gateway_types::websocket::SubscriptionEvent;
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
