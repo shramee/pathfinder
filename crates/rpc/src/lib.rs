@@ -21,6 +21,7 @@ use jsonrpsee::{
     http_server::{HttpServerBuilder, HttpServerHandle, RpcModule},
     ws_server::{WsServerBuilder, WsServerHandle},
 };
+use starknet_gateway_types::websocket::SubscriptionEvent;
 use std::{collections::HashMap, net::SocketAddr, result::Result};
 use tokio::sync::{broadcast, RwLock};
 
@@ -60,12 +61,12 @@ impl RpcServer {
     ) -> Result<
         (
             Either<HttpServerHandle, WsServerHandle>,
-            HashMap<String, broadcast::Sender<String>>,
+            HashMap<String, broadcast::Sender<SubscriptionEvent>>,
             SocketAddr,
         ),
         anyhow::Error,
     > {
-        let mut event_txs: HashMap<String, broadcast::Sender<String>> = HashMap::new();
+        let mut event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>> = HashMap::new();
 
         match self.transport {
             Transport::Http => {
@@ -130,7 +131,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
     /// Starts the WS-RPC server.
     async fn run_ws(
         self,
-        event_txs: &mut HashMap<String, broadcast::Sender<String>>,
+        event_txs: &mut HashMap<String, broadcast::Sender<SubscriptionEvent>>,
     ) -> Result<(WsServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
         let server = WsServerBuilder::default()
             .set_middleware(self.middleware)

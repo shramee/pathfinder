@@ -28,6 +28,7 @@ use starknet_gateway_client::ClientApi;
 use starknet_gateway_types::{
     pending::PendingData,
     reply::{state_update::DeployedContract, Block, MaybePendingBlock, StateUpdate},
+    websocket::SubscriptionEvent,
 };
 use std::collections::HashMap;
 use std::future::Future;
@@ -47,7 +48,7 @@ pub async fn sync<Transport, SequencerClient, F1, F2, L1Sync, L2Sync>(
     l2_sync: L2Sync,
     pending_data: PendingData,
     pending_poll_interval: Option<std::time::Duration>,
-    event_txs: HashMap<String, broadcast::Sender<String>>,
+    event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
 ) -> anyhow::Result<()>
 where
     Transport: EthereumTransport + Clone,
@@ -57,7 +58,7 @@ where
     L1Sync: FnMut(mpsc::Sender<l1::Event>, Transport, Chain, H160, Option<StateUpdateLog>) -> F1,
     L2Sync: FnOnce(
             mpsc::Sender<l2::Event>,
-            HashMap<String, broadcast::Sender<String>>,
+            HashMap<String, broadcast::Sender<SubscriptionEvent>>,
             SequencerClient,
             Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
             Chain,
@@ -907,6 +908,7 @@ mod tests {
         pending::PendingData,
         reply,
         request::{add_transaction::ContractDefinition, BlockHashOrTag},
+        websocket::SubscriptionEvent,
     };
     use std::{collections::HashMap, sync::Arc, time::Duration};
     use tokio::sync::{broadcast, mpsc};
@@ -1076,7 +1078,7 @@ mod tests {
 
     async fn l2_noop(
         _: mpsc::Sender<l2::Event>,
-        _: HashMap<String, broadcast::Sender<String>>,
+        _: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
         _: impl ClientApi,
         _: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
         _: Chain,
