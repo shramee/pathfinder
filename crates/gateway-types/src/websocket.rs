@@ -9,14 +9,14 @@ pub struct WebsocketEventSync {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct WebsocketEventNewHeadEvent {
+pub struct WebsocketEventNewHead {
     pub block: Box<Block>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WebsocketSenders {
     pub sync: broadcast::Sender<WebsocketEventSync>,
-    pub new_head: broadcast::Sender<WebsocketEventNewHeadEvent>,
+    pub new_head: broadcast::Sender<WebsocketEventNewHead>,
 }
 
 impl WebsocketSenders {

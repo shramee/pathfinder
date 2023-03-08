@@ -10,7 +10,7 @@ use starknet_gateway_types::{
         state_update::{DeployedContract, StateDiff},
         Block, PendingBlock, StateUpdate, Status,
     },
-    websocket::{WebsocketEventNewHeadEvent, WebsocketSenders},
+    websocket::{WebsocketEventNewHead, WebsocketSenders},
 };
 use std::time::Duration;
 use std::{collections::HashSet, sync::Arc};
@@ -176,7 +176,7 @@ pub async fn sync(
 
         let new_head_channel = &websocket_txs.new_head;
         if new_head_channel.receiver_count() > 0 {
-            new_head_channel.send(WebsocketEventNewHeadEvent {
+            new_head_channel.send(WebsocketEventNewHead {
                 block: block.clone(),
             })?;
         }
