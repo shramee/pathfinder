@@ -21,9 +21,9 @@ use jsonrpsee::{
     http_server::{HttpServerBuilder, HttpServerHandle, RpcModule},
     ws_server::{WsServerBuilder, WsServerHandle},
 };
-use starknet_gateway_types::websocket::SubscriptionEvent;
-use std::{collections::HashMap, net::SocketAddr, result::Result};
-use tokio::sync::{broadcast, RwLock};
+use starknet_gateway_types::websocket::WebsocketSenders;
+use std::{net::SocketAddr, result::Result};
+use tokio::sync::RwLock;
 
 use v01::{api::RpcApi, types::reply::Syncing};
 
@@ -61,21 +61,21 @@ impl RpcServer {
     ) -> Result<
         (
             Either<HttpServerHandle, WsServerHandle>,
-            HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+            WebsocketSenders,
             SocketAddr,
         ),
         anyhow::Error,
     > {
-        let mut event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>> = HashMap::new();
+        let websocket_txs = WebsocketSenders::new();
 
         match self.transport {
             Transport::Http => {
                 let (handle, addr) = self.run_http().await?;
-                Ok((Either::Left(handle), event_txs, addr))
+                Ok((Either::Left(handle), websocket_txs, addr))
             }
             Transport::Ws => {
-                let (handle, addr) = self.run_ws(&mut event_txs).await?;
-                Ok((Either::Right(handle), event_txs, addr))
+                let (handle, addr) = self.run_ws(websocket_txs.clone()).await?;
+                Ok((Either::Right(handle), websocket_txs, addr))
             }
         }
     }
@@ -131,7 +131,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
     /// Starts the WS-RPC server.
     async fn run_ws(
         self,
-        event_txs: &mut HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+        websocket_txs: WebsocketSenders,
     ) -> Result<(WsServerHandle, SocketAddr), jsonrpsee::core::error::Error> {
         let server = WsServerBuilder::default()
             .set_middleware(self.middleware)
@@ -168,7 +168,7 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
 
         let _module_v02 = v02::register_methods(context_v02)?;
         let _pathfinder_module = pathfinder::register_methods(pathfinder_context)?;
-        let websocket_module = websocket::register_subscriptions(websocket_context, event_txs)?;
+        let websocket_module = websocket::register_subscriptions(websocket_context, websocket_txs)?;
 
         server
             .start(websocket_module)

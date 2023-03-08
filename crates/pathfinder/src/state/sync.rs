@@ -28,12 +28,12 @@ use starknet_gateway_client::ClientApi;
 use starknet_gateway_types::{
     pending::PendingData,
     reply::{state_update::DeployedContract, Block, MaybePendingBlock, StateUpdate},
-    websocket::SubscriptionEvent,
+    websocket::WebsocketSenders,
 };
-use std::collections::HashMap;
+
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 /// Implements the main sync loop, where L1 and L2 sync results are combined.
 #[allow(clippy::too_many_arguments)]
@@ -48,7 +48,7 @@ pub async fn sync<Transport, SequencerClient, F1, F2, L1Sync, L2Sync>(
     l2_sync: L2Sync,
     pending_data: PendingData,
     pending_poll_interval: Option<std::time::Duration>,
-    event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+    websocket_txs: WebsocketSenders,
 ) -> anyhow::Result<()>
 where
     Transport: EthereumTransport + Clone,
@@ -58,7 +58,7 @@ where
     L1Sync: FnMut(mpsc::Sender<l1::Event>, Transport, Chain, H160, Option<StateUpdateLog>) -> F1,
     L2Sync: FnOnce(
             mpsc::Sender<l2::Event>,
-            HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+            WebsocketSenders,
             SequencerClient,
             Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
             Chain,
@@ -109,7 +109,7 @@ where
     ));
     let mut l2_handle = tokio::spawn(l2_sync(
         tx_l2,
-        event_txs,
+        websocket_txs,
         sequencer.clone(),
         l2_head,
         chain,
@@ -392,12 +392,10 @@ where
 
                     let (new_tx, new_rx) = mpsc::channel(1);
 
-                    let mut event_txs = HashMap::new();
-                    event_txs.insert("starknet_subscribe_newHeads".to_string(), broadcast::channel(100).0);
-                    event_txs.insert("starknet_subscribe_sync".to_string(), broadcast::channel(100).0);
+                    let websocket_txs = WebsocketSenders::new();
                     rx_l2 = new_rx;
 
-                    let fut = l2_sync(new_tx, event_txs, sequencer.clone(), l2_head, chain, pending_poll_interval);
+                    let fut = l2_sync(new_tx, websocket_txs, sequencer.clone(), l2_head, chain, pending_poll_interval);
 
                     l2_handle = tokio::spawn(async move {
                         #[cfg(not(test))]
@@ -908,10 +906,10 @@ mod tests {
         pending::PendingData,
         reply,
         request::{add_transaction::ContractDefinition, BlockHashOrTag},
-        websocket::SubscriptionEvent,
+        websocket::WebsocketSenders,
     };
-    use std::{collections::HashMap, sync::Arc, time::Duration};
-    use tokio::sync::{broadcast, mpsc};
+    use std::{sync::Arc, time::Duration};
+    use tokio::sync::mpsc;
 
     #[derive(Debug, Clone)]
     struct FakeTransport;
@@ -1078,7 +1076,7 @@ mod tests {
 
     async fn l2_noop(
         _: mpsc::Sender<l2::Event>,
-        _: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+        _: WebsocketSenders,
         _: impl ClientApi,
         _: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
         _: Chain,
@@ -1175,15 +1173,7 @@ mod tests {
         let chain = Chain::Testnet;
         let sync_state = Arc::new(SyncState::default());
         let core_address = pathfinder_ethereum::contract::TESTNET_ADDRESSES.core;
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         lazy_static::lazy_static! {
             static ref UPDATES: Arc<tokio::sync::RwLock<Vec<Vec<pathfinder_ethereum::log::StateUpdateLog>>>> =
@@ -1238,7 +1228,7 @@ mod tests {
                 l2_noop,
                 PendingData::default(),
                 None,
-                event_txs.clone(),
+                websocket_txs.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1281,15 +1271,7 @@ mod tests {
             let storage = Storage::in_memory().unwrap();
             let mut connection = storage.connection().unwrap();
             let tx = connection.transaction().unwrap();
-            let mut event_txs = HashMap::new();
-            event_txs.insert(
-                "starknet_subscribe_newHeads".to_string(),
-                broadcast::channel(100).0,
-            );
-            event_txs.insert(
-                "starknet_subscribe_sync".to_string(),
-                broadcast::channel(100).0,
-            );
+            let websocket_txs = WebsocketSenders::new();
 
             // A simple L1 sync task
             let l1 = move |tx: mpsc::Sender<l1::Event>, _, _, _, _| async move {
@@ -1322,7 +1304,7 @@ mod tests {
                 l2_noop,
                 PendingData::default(),
                 None,
-                event_txs,
+                websocket_txs,
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1359,15 +1341,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let mut connection = storage.connection().unwrap();
         let tx = connection.transaction().unwrap();
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // This is what we're asking for
         L1StateTable::upsert(&tx, &STATE_UPDATE_LOG0).unwrap();
@@ -1402,7 +1376,7 @@ mod tests {
             l2_noop,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -1414,15 +1388,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
 
         let (starts_tx, mut starts_rx) = tokio::sync::mpsc::channel(1);
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         let l1 = move |_, _, _, _, _| {
             let starts_tx = starts_tx.clone();
@@ -1448,7 +1414,7 @@ mod tests {
             l2_noop,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
 
         let timeout = std::time::Duration::from_secs(1);
@@ -1470,15 +1436,7 @@ mod tests {
     async fn l2_update() {
         let chain = Chain::Testnet;
         let sync_state = Arc::new(SyncState::default());
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // Incoming L2 update
         let block = || BLOCK0.clone();
@@ -1533,7 +1491,7 @@ mod tests {
                 l2,
                 PendingData::default(),
                 None,
-                event_txs.clone(),
+                websocket_txs.clone(),
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1571,15 +1529,7 @@ mod tests {
             let storage = Storage::in_memory().unwrap();
             let mut connection = storage.connection().unwrap();
             let tx = connection.transaction().unwrap();
-            let mut event_txs = HashMap::new();
-            event_txs.insert(
-                "starknet_subscribe_newHeads".to_string(),
-                broadcast::channel(100).0,
-            );
-            event_txs.insert(
-                "starknet_subscribe_sync".to_string(),
-                broadcast::channel(100).0,
-            );
+            let websocket_txs = WebsocketSenders::new();
 
             // A simple L2 sync task
             let l2 = move |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
@@ -1612,7 +1562,7 @@ mod tests {
                 l2,
                 PendingData::default(),
                 None,
-                event_txs,
+                websocket_txs,
             ));
 
             // TODO Find a better way to figure out that the DB update has already been performed
@@ -1647,15 +1597,7 @@ mod tests {
     async fn l2_new_contract() {
         let storage = Storage::in_memory().unwrap();
         let connection = storage.connection().unwrap();
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // A simple L2 sync task
         let l2 = |tx: mpsc::Sender<l2::Event>, _, _, _, _, _| async move {
@@ -1685,7 +1627,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
 
         // TODO Find a better way to figure out that the DB update has already been performed
@@ -1702,15 +1644,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let mut connection = storage.connection().unwrap();
         let tx = connection.transaction().unwrap();
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // This is what we're asking for
         StarknetBlocksTable::insert(&tx, &STORAGE_BLOCK0, None).unwrap();
@@ -1743,7 +1677,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
     }
 
@@ -1752,15 +1686,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
         let connection = storage.connection().unwrap();
         let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // This is what we're asking for
         ContractCodeTable::insert_compressed(
@@ -1801,7 +1727,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
     }
 
@@ -1812,15 +1738,7 @@ mod tests {
         let storage = Storage::in_memory().unwrap();
 
         static CNT: AtomicUsize = AtomicUsize::new(0);
-        let mut event_txs = HashMap::new();
-        event_txs.insert(
-            "starknet_subscribe_newHeads".to_string(),
-            broadcast::channel(100).0,
-        );
-        event_txs.insert(
-            "starknet_subscribe_sync".to_string(),
-            broadcast::channel(100).0,
-        );
+        let websocket_txs = WebsocketSenders::new();
 
         // A simple L2 sync task
         let l2 = move |_, _, _, _, _, _| async move {
@@ -1840,7 +1758,7 @@ mod tests {
             l2,
             PendingData::default(),
             None,
-            event_txs,
+            websocket_txs,
         ));
 
         tokio::time::sleep(Duration::from_millis(5)).await;
