@@ -8,7 +8,7 @@ pub mod subscription;
 /// Registers all methods for the v0.2 RPC API
 pub fn register_subscriptions(
     context: RpcContext,
-    ws_broabcast_txs: WebsocketSenders,
+    ws_broadcast_txs: WebsocketSenders,
 ) -> anyhow::Result<Methods> {
     let methods = crate::module::Module::new(context)
         .register_subscription(
@@ -16,14 +16,14 @@ pub fn register_subscriptions(
             "s_newHeads",
             "starknet_unsubscribe_newHeads",
             subscription::subscribe_new_heads::subscribe_new_heads,
-            ws_broabcast_txs.new_head.clone(),
+            ws_broadcast_txs.new_head.clone(),
         )?
         .register_subscription(
             "starknet_subscribe_sync",
             "s_sync",
             "starknet_unsubscribe_sync",
             subscription::subscribe_sync::subscribe_sync,
-            ws_broabcast_txs.sync.clone(),
+            ws_broadcast_txs.sync.clone(),
         )?
         .build();
 
