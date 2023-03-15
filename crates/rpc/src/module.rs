@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use jsonrpsee::core::server::rpc_module::{Methods, PendingSubscription};
-use starknet_gateway_types::websocket::SubscriptionEvent;
+
 use tokio::sync::broadcast;
 
 use crate::context::RpcContext;
@@ -106,16 +105,16 @@ impl Module {
         Ok(self)
     }
 
-    pub fn register_subscription<Subscription>(
+    pub fn register_subscription<Subscription, WSAnySubscriptionEvent: 'static + Send>(
         mut self,
         subscription_name: &'static str,
         subscription_answer_name: &'static str,
         unsubscription_name: &'static str,
         subscription: Subscription,
-        event_txs: &mut HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+        ws_broadcast_tx: broadcast::Sender<WSAnySubscriptionEvent>,
     ) -> anyhow::Result<Self>
     where
-        Subscription: (Fn(RpcContext, PendingSubscription, &broadcast::Sender<SubscriptionEvent>))
+        Subscription: (Fn(RpcContext, PendingSubscription, &broadcast::Sender<WSAnySubscriptionEvent>))
             + Copy
             + Send
             + Sync
@@ -126,12 +125,9 @@ impl Module {
 
         metrics::register_counter!("rpc_subscription_calls_total", "subscription" => subscription_name);
 
-        event_txs.insert(subscription_name.to_string(), broadcast::channel(100).0);
-        let subscription_channel = event_txs.get(subscription_name).unwrap().clone();
-
         let subscription_callback =
             move |_params: Params<'_>, pending, context: Arc<RpcContext>| {
-                subscription((*context).clone(), pending, &subscription_channel)
+                subscription((*context).clone(), pending, &ws_broadcast_tx.clone())
             };
 
         self.0

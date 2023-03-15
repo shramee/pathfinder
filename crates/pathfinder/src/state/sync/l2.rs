@@ -10,14 +10,11 @@ use starknet_gateway_types::{
         state_update::{DeployedContract, StateDiff},
         Block, PendingBlock, StateUpdate, Status,
     },
-    websocket::{SubscriptionEvent, SubscriptionNewHeadEvent, SubscriptionSyncEvent},
+    websocket::{WebsocketEventNewHead, WebsocketSenders},
 };
 use std::time::Duration;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Timings {
@@ -56,7 +53,7 @@ pub enum Event {
 
 pub async fn sync(
     tx_event: mpsc::Sender<Event>,
-    event_txs: HashMap<String, broadcast::Sender<SubscriptionEvent>>,
+    websocket_txs: WebsocketSenders,
     sequencer: impl ClientApi,
     mut head: Option<(StarknetBlockNumber, StarknetBlockHash, GlobalRoot)>,
     chain: Chain,
@@ -169,20 +166,19 @@ pub async fn sync(
             .await
             .context("Event channel closed")?;
 
-        //TODO will be replaced with hashmap based on event type once shared architecture is finalized
-        // let sync_channel = event_txs.get("starknet_subscribe_sync").unwrap();
+        // @TODO Working example to use where applicable
+        // let sync_channel = &websocket_txs.sync;
         // if sync_channel.receiver_count() > 0 {
-        //     sync_channel.send(SubscriptionEvent::Sync(SubscriptionSyncEvent {
-        //         block: block,
-        //     }))?;
+        //     sync_channel.send(WebsocketEventSync {
+        //         block: block.clone(),
+        //     })?;
         // }
 
-        //TODO will be replaced with hashmap based on event type once shared architecture is finalized
-        let new_head_channel = event_txs.get("starknet_subscribe_newHeads").unwrap();
+        let new_head_channel = &websocket_txs.new_head;
         if new_head_channel.receiver_count() > 0 {
-            new_head_channel.send(SubscriptionEvent::NewHead(SubscriptionNewHeadEvent {
+            new_head_channel.send(WebsocketEventNewHead {
                 block: block.clone(),
-            }))?;
+            })?;
         }
     }
 }
@@ -572,7 +568,6 @@ mod tests {
             reply,
         };
         use std::collections::HashMap;
-        use tokio::sync::broadcast;
 
         const DEF0: &str = r#"{
             "abi": [],
@@ -867,19 +862,12 @@ mod tests {
             use super::*;
             use pathfinder_common::Chain;
             use pretty_assertions::assert_eq;
+            use starknet_gateway_types::websocket::WebsocketSenders;
 
             #[tokio::test]
             async fn from_genesis() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -937,7 +925,14 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -978,15 +973,7 @@ mod tests {
             #[tokio::test]
             async fn resumed_after_genesis() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1028,7 +1015,7 @@ mod tests {
                 // Let's run the UUT
                 let _jh = tokio::spawn(sync(
                     tx_event,
-                    event_txs,
+                    websocket_txs,
                     mock,
                     Some((BLOCK0_NUMBER, *BLOCK0_HASH, *GLOBAL_ROOT0)),
                     Chain::Testnet,
@@ -1060,19 +1047,12 @@ mod tests {
             use super::*;
             use pathfinder_common::Chain;
             use starknet_gateway_types::reply::Status;
+            use starknet_gateway_types::websocket::WebsocketSenders;
 
             #[tokio::test]
             async fn invalid_block_status() {
                 let (tx_event, _rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1082,7 +1062,14 @@ mod tests {
                 block.status = Status::Reverted;
                 expect_block(&mut mock, &mut seq, BLOCK0_NUMBER.into(), Ok(block.into()));
 
-                let jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
                 let error = jh.await.unwrap().unwrap_err();
                 assert_eq!(
                     &error.to_string(),
@@ -1095,6 +1082,7 @@ mod tests {
             use super::*;
             use pathfinder_common::Chain;
             use pretty_assertions::assert_eq;
+            use starknet_gateway_types::websocket::WebsocketSenders;
 
             #[tokio::test]
             // This reorg occurs at the genesis block, which is swapped for a new one.
@@ -1107,15 +1095,7 @@ mod tests {
             //
             async fn at_genesis_which_is_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1195,7 +1175,14 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1248,15 +1235,7 @@ mod tests {
             //
             async fn at_genesis_which_is_not_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1410,7 +1389,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1497,15 +1483,7 @@ mod tests {
             //
             async fn after_genesis_and_not_at_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1700,7 +1678,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1782,15 +1767,7 @@ mod tests {
             //
             async fn after_genesis_and_at_head() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -1917,7 +1894,15 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1981,15 +1966,7 @@ mod tests {
             //
             async fn parent_hash_mismatch() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 let mut mock = MockClientApi::new();
                 let mut seq = mockall::Sequence::new();
@@ -2123,7 +2100,14 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+                let _jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -2180,15 +2164,7 @@ mod tests {
             #[tokio::test]
             async fn shutdown() {
                 let (tx_event, mut rx_event) = tokio::sync::mpsc::channel(1);
-                let mut event_txs = HashMap::new();
-                event_txs.insert(
-                    "starknet_subscribe_newHeads".to_string(),
-                    broadcast::channel(100).0,
-                );
-                event_txs.insert(
-                    "starknet_subscribe_sync".to_string(),
-                    broadcast::channel(100).0,
-                );
+                let websocket_txs = WebsocketSenders::new();
 
                 // Closing the event's channel should trigger the sync to exit with error after the first send.
                 rx_event.close();
@@ -2210,7 +2186,15 @@ mod tests {
                 );
 
                 // Run the UUT
-                let jh = tokio::spawn(sync(tx_event, event_txs, mock, None, Chain::Testnet, None));
+
+                let jh = tokio::spawn(sync(
+                    tx_event,
+                    websocket_txs,
+                    mock,
+                    None,
+                    Chain::Testnet,
+                    None,
+                ));
 
                 // Wrap this in a timeout so we don't wait forever in case of test failure.
                 // Right now closing the channel causes an error.
