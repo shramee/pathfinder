@@ -14,7 +14,7 @@ async fn api_versions_are_routed_correctly_for_all_methods() {
     let context = RpcContext::for_tests();
     let (_server_handle, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
         .with_logger(RpcMetricsLogger)
-        .run()
+        .run(WebsocketSenders::new())
         .await
         .unwrap();
 

@@ -229,7 +229,8 @@ mod tests {
         use serde_json::json;
 
         let context = RpcContext::for_tests();
-        let (_server_handle, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
+        // unused websocket_txs: WebsocketSenders
+        let (_server_handle, _, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
             .run()
             .await
             .unwrap();
@@ -284,7 +285,8 @@ mod tests {
         use crate::{RpcContext, RpcServer};
 
         let context = RpcContext::for_tests();
-        let (_server_handle, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
+        // unused websocket_txs: WebsocketSenders
+        let (_server_handle, _, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
             .run()
             .await
             .unwrap();

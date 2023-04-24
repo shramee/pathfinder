@@ -29,6 +29,7 @@ pub struct RpcServer {
     context: RpcContext,
     logger: MaybeRpcMetricsLogger,
     max_connections: u32,
+    websocket_txs: WebsocketSenders,
 }
 
 impl RpcServer {
@@ -38,6 +39,7 @@ impl RpcServer {
             context,
             logger: MaybeRpcMetricsLogger::NoOp,
             max_connections: DEFAULT_MAX_CONNECTIONS,
+            websocket_txs: WebsocketSenders::new(),
         }
     }
 
@@ -93,9 +95,14 @@ Hint: If you are looking to run two instances of pathfinder, you must configure 
         let module = v02::register_methods(module)?;
         let module = v03::register_methods(module)?;
         let module = pathfinder::register_methods(module)?;
+        let module = websocket::register_subscriptions(module, self.websocket_txs.clone())?;
         let methods = module.build();
 
         Ok(server.start(methods).map(|handle| (handle, local_addr))?)
+    }
+
+    pub fn get_websocket_txs(&self) -> WebsocketSenders {
+        self.websocket_txs.clone()
     }
 }
 

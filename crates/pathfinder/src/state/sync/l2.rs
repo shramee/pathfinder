@@ -13,6 +13,7 @@ use starknet_gateway_types::{
         state_update::StateDiff, Block, MaybePendingStateUpdate, PendingBlock, PendingStateUpdate,
         StateUpdate, Status,
     },
+    websocket::{WebsocketEventNewHead, WebsocketSenders},
 };
 use std::time::Duration;
 use std::{collections::HashSet, sync::Arc};
@@ -60,6 +61,7 @@ pub enum Event {
 
 pub async fn sync(
     tx_event: mpsc::Sender<Event>,
+    websocket_txs: WebsocketSenders,
     sequencer: impl ClientApi,
     mut head: Option<(StarknetBlockNumber, StarknetBlockHash, StateCommitment)>,
     chain: Chain,
@@ -185,12 +187,19 @@ pub async fn sync(
 
         tx_event
             .send(Event::Update(
-                (block, commitments),
+                (block.clone(), commitments),
                 Box::new(state_update),
                 timings,
             ))
             .await
             .context("Event channel closed")?;
+
+        let new_head_channel = &websocket_txs.new_head;
+        if new_head_channel.receiver_count() > 0 {
+            new_head_channel.send(WebsocketEventNewHead {
+                block: block.clone(),
+            })?;
+        }
     }
 }
 
@@ -575,6 +584,7 @@ mod tests {
         use starknet_gateway_types::{
             error::{SequencerError, StarknetError, StarknetErrorCode},
             reply,
+            websocket::WebsocketSenders,
         };
         use std::collections::HashMap;
 
@@ -601,6 +611,18 @@ mod tests {
         const BLOCK2_NUMBER: StarknetBlockNumber = StarknetBlockNumber::new_or_panic(2);
         const BLOCK3_NUMBER: StarknetBlockNumber = StarknetBlockNumber::new_or_panic(3);
         const BLOCK4_NUMBER: StarknetBlockNumber = StarknetBlockNumber::new_or_panic(4);
+
+        fn spawn_sync_default(tx_event: mpsc::Sender<Event>, sequencer: impl ClientApi) {
+            tokio::spawn(sync(
+                tx_event,
+                WebsocketSenders::new(),
+                sequencer,
+                head,
+                Chain::Testnet,
+                None,
+                MODE,
+            ))
+        }
 
         lazy_static::lazy_static! {
             static ref BLOCK0_HASH: StarknetBlockHash = StarknetBlockHash(Felt::from_be_slice(b"block 0 hash").unwrap());
@@ -947,7 +969,7 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1024,6 +1046,7 @@ mod tests {
                 // Let's run the UUT
                 let _jh = tokio::spawn(sync(
                     tx_event,
+                    WebsocketSenders::new(),
                     mock,
                     Some((BLOCK0_NUMBER, *BLOCK0_HASH, *GLOBAL_ROOT0)),
                     Chain::Testnet,
@@ -1066,7 +1089,7 @@ mod tests {
                 block.status = Status::Reverted;
                 expect_block(&mut mock, &mut seq, BLOCK0_NUMBER.into(), Ok(block.into()));
 
-                let jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let jh = spawn_sync_default(tx_event, mock);
                 let error = jh.await.unwrap().unwrap_err();
                 assert_eq!(
                     &error.to_string(),
@@ -1169,7 +1192,7 @@ mod tests {
                 );
 
                 // Let's run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1370,7 +1393,7 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1644,7 +1667,7 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -1847,7 +1870,7 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -2039,7 +2062,7 @@ mod tests {
                 );
 
                 // Run the UUT
-                let _jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let _jh = spawn_sync_default(tx_event, mock);
 
                 let zstd_magic = vec![0x28, 0xb5, 0x2f, 0xfd];
 
@@ -2112,7 +2135,7 @@ mod tests {
                 );
 
                 // Run the UUT
-                let jh = tokio::spawn(sync(tx_event, mock, None, Chain::Testnet, None, MODE));
+                let jh = spawn_sync_default(tx_event, mock);
 
                 // Wrap this in a timeout so we don't wait forever in case of test failure.
                 // Right now closing the channel causes an error.
