@@ -17,6 +17,8 @@ pub mod websocket;
 use crate::metrics::logger::{MaybeRpcMetricsLogger, RpcMetricsLogger};
 use crate::v02::types::syncing::Syncing;
 use context::RpcContext;
+use http::Request;
+use hyper::Body;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
 use starknet_gateway_types::websocket::WebsocketSenders;
 use std::{net::SocketAddr, result::Result};
@@ -65,7 +67,11 @@ impl RpcServer {
             .set_logger(self.logger)
             .set_middleware(tower::ServiceBuilder::new()
                 .map_result(versioning::try_map_errors_to_responses)
-                .filter_async(|result| async move {
+                .filter_async(|result: Request<Body>| async move {
+					// skip method_name checks for websocket handshake
+					if result.headers().get("sec-websocket-key").is_some() {
+						return Ok(result);
+					}
                     versioning::prefix_rpc_method_names_with_version(result, TEN_MB).await
                 }))
             .build(self.addr)
