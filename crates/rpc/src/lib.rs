@@ -12,11 +12,13 @@ pub mod test_client;
 pub mod v02;
 pub mod v03;
 pub mod versioning;
+pub mod websocket;
 
 use crate::metrics::logger::{MaybeRpcMetricsLogger, RpcMetricsLogger};
 use crate::v02::types::syncing::Syncing;
 use context::RpcContext;
 use jsonrpsee::server::{ServerBuilder, ServerHandle};
+use starknet_gateway_types::websocket::WebsocketSenders;
 use std::{net::SocketAddr, result::Result};
 use tokio::sync::RwLock;
 
