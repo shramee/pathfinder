@@ -175,9 +175,31 @@ mod response {
     }
 }
 
+// @TODO CONFLICT Updated upstream
 pub mod test_utils {
     pub mod method_names {
         pub const COMMON_FOR_V02_V03: [&str; 23] = [
+// =======
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn api_versions_are_routed_correctly_for_all_methods() {
+        use crate::test_client::TestClientBuilder;
+        use crate::{RpcContext, RpcMetricsLogger, RpcServer};
+        use pathfinder_common::test_utils::metrics::{FakeRecorder, RecorderGuard};
+        use serde_json::json;
+
+        let context = RpcContext::for_tests();
+        let (_server_handle, _event_txs, address) =
+            RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
+                .with_logger(RpcMetricsLogger)
+                .run()
+                .await
+                .unwrap();
+
+        // Common methods for starknet RPC spec v0.2 and v0.3
+        let common = [
+// @TODO CONFLICT Stashed changes
             "starknet_addDeclareTransaction",
             "starknet_addDeployAccountTransaction",
             "starknet_addInvokeTransaction",
@@ -284,10 +306,11 @@ mod tests {
         use crate::{RpcContext, RpcServer};
 
         let context = RpcContext::for_tests();
-        let (_server_handle, address) = RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
-            .run()
-            .await
-            .unwrap();
+        let (_server_handle, _event_txs, address) =
+            RpcServer::new("127.0.0.1:0".parse().unwrap(), context)
+                .run()
+                .await
+                .unwrap();
 
         let url = format!("http://{address}/invalid/path");
 
